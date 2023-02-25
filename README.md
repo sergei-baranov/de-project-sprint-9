@@ -17,3 +17,5 @@ cr.yandex/crpqpe6k11qtk5akkaka/cdm_service:v2023-02-25-r1
 ```bash
 https://datalens.yandex/psilbmxn1xm2f
 ```
+
+Пустая категория - это от тестовых запусков, когда я ещё не научился определять категорию продукта.
