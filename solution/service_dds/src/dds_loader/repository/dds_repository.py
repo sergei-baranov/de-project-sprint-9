@@ -12,6 +12,123 @@ class DdsRepository:
     def __init__(self, db: PgConnect) -> None:
         self._db = db
 
+    def get_user_category_counters(self, user_pk: str, dict_category_pk: dict) -> list:
+        """
+        агрегирует заказы посетителя по категориям товаров
+        для заданного id пользователя и списка id категорий (все id - строки).
+        на выходе - list od dicts; ключи в каждом словаре:
+        "h_user_pk", "h_category_pk", "category_name", "order_cnt".
+        Если ничего не найдено - на выходе пустой список.
+        """
+
+        counters = []
+
+        # dict там на входе - как вариант дедупликации;
+        # берём keys(), маппим uuid-ы в строки, джойним
+        category_pk_stringified = list(map(lambda x: str(x), dict_category_pk.keys()))
+        str_category_pk = "'" + ("', '".join(category_pk_stringified)) + "'"
+
+        query = """
+            SELECT
+                "u"."h_user_pk",
+                "c"."h_category_pk",
+                "c"."category_name",
+                COUNT(DISTINCT "ou"."h_order_pk") as "order_cnt"
+            FROM
+                "dds"."h_user" as "u"
+                INNER JOIN "dds"."l_order_user" as "ou" ON (
+                    "ou"."h_user_pk" = "u"."h_user_pk"
+                )
+                INNER JOIN "dds"."l_order_product" "op" ON (
+                    "op"."h_order_pk" = "ou"."h_order_pk"
+                )
+                INNER JOIN "dds"."l_product_category" "pc" ON (
+                    "pc"."h_product_pk" = "op"."h_product_pk"
+                )
+                INNER JOIN "dds"."h_category" "c" ON (
+                    "c"."h_category_pk" = "pc"."h_category_pk"
+                )
+            WHERE
+                "u"."h_user_pk" = '{filter_user_pk}'
+                AND "c"."h_category_pk" IN ({filter_category_pk})
+            GROUP BY ("u"."h_user_pk", "c"."h_category_pk", "c"."category_name")
+            ;
+        """.format(
+            filter_user_pk=user_pk,
+            filter_category_pk=str_category_pk
+        )
+
+        with self._db.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query)
+                for record in cur:
+                    counters.append({
+                        "h_user_pk": str(record[0]),  # 'h_user_pk'
+                        "h_category_pk": str(record[1]),  # 'h_category_pk'
+                        "category_name": record[2],  # 'category_name'
+                        "order_cnt": record[3]  # 'order_cnt'
+                    })
+                cur.close()
+
+        return counters
+
+    def get_user_product_counters(self, user_pk: str, dict_product_pk: dict) -> list:
+        """
+        агрегирует заказы посетителя по продуктам (блюдам)
+        для заданного id пользователя и списка id продуктов (все id - строки).
+        на выходе - list od dicts; ключи в каждом словаре:
+        "h_user_pk", "h_product_pk", "product_name", "order_cnt".
+        Если ничего не найдено - на выходе пустой список.
+        """
+
+        counters = []
+
+        # dict там на входе - как вариант дедупликации;
+        # берём keys(), маппим uuid-ы в строки, джойним
+        product_pk_stringified = list(map(lambda x: str(x), dict_product_pk.keys()))
+        str_product_pk = "'" + ("', '".join(product_pk_stringified)) + "'"
+
+        query = """
+            SELECT
+                "u"."h_user_pk",
+                "op"."h_product_pk",
+                "pn"."name" as "product_name",
+                COUNT(DISTINCT "ou"."h_order_pk") as "order_cnt"
+            FROM
+                "dds"."h_user" as "u"
+                INNER JOIN "dds"."l_order_user" as "ou" ON (
+                    "ou"."h_user_pk" = "u"."h_user_pk"
+                )
+                INNER JOIN "dds"."l_order_product" "op" ON (
+                    "op"."h_order_pk" = "ou"."h_order_pk"
+                )
+                INNER JOIN "dds"."s_product_names" "pn" ON (
+                    "pn"."h_product_pk" = "op"."h_product_pk"
+                )
+            WHERE
+                "u"."h_user_pk" = '{filter_user_pk}'
+                AND "op"."h_product_pk" IN ({filter_product_pk})
+            GROUP BY ("u"."h_user_pk", "op"."h_product_pk", "pn"."name")
+            ;
+        """.format(
+            filter_user_pk=user_pk,
+            filter_product_pk=str_product_pk
+        )
+
+        with self._db.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query)
+                for record in cur:
+                    counters.append({
+                        "h_user_pk": str(record[0]),  # 'h_user_pk'
+                        "h_product_pk": str(record[1]),  # 'h_product_pk'
+                        "product_name": record[2],  # 'product_name'
+                        "order_cnt": record[3]  # 'order_cnt'
+                    })
+                cur.close()
+
+        return counters
+
     def l_order_user_upsert(self, hk_order_user_pk: str,
                             h_order_pk: str, h_user_pk: str,
                             load_dt: datetime, load_src: str) -> None:

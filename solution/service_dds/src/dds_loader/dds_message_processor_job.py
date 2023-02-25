@@ -8,8 +8,8 @@ from dds_loader.repository.dds_repository import DdsRepository
 
 
 class DdsMessageProcessor:
-    _consumer: KafkaConsumer = None
-    _producer: KafkaProducer = None
+    _kafka_consumer: KafkaConsumer = None
+    _kafka_producer: KafkaProducer = None
     _dds_repository: DdsRepository = None
     _logger: Logger = None
     _batch_size: int = 30
@@ -24,6 +24,7 @@ class DdsMessageProcessor:
         self._kafka_producer = kafka_producer
         self._dds_repository = dds_repository
         self._logger = logger
+        # forced
         self._batch_size = 30
 
     def run(self) -> None:
@@ -34,7 +35,7 @@ class DdsMessageProcessor:
         while processed_messages < self._batch_size:
             # Step 1. Получаем сообщение из Kafka с помощью `consume()`.
             dct_msg = self._kafka_consumer.consume(timeout=timeout)
-            # message example
+            # message example (пример реализованного контракта)
             # {
             # 'object_id': 1027424,
             # 'object_type': 'order',
@@ -141,11 +142,21 @@ class DdsMessageProcessor:
                 )
 
             # для наглядности отдельный цикл с повторным формированием uuid и т. п.
+            #
+            # сюда сложим pk всех продуктов для дальнейшего использования
+            # в Step 11. Сообщения для cdm-сервиса, а именно для заполнения cdm.user_product_counters
+            dict_product_pk = {}
+            # сюда сложим pk всех категорий для дальнейшего использования
+            # в Step 12. Сообщения для cdm-сервиса, а именно для заполненияcdm.user_category_counters
+            dict_category_pk = {}
             for next_product in dct_msg['payload']['products']:
                 next_product_id = next_product['id']
                 h_product_pk = uuid.uuid3(uuid.NAMESPACE_X500, next_product_id)
+                dict_product_pk[h_product_pk] = h_product_pk  # for Step 11
+
                 next_category = next_product['category']
                 h_category_pk = uuid.uuid3(uuid.NAMESPACE_X500, next_category)
+                dict_category_pk[h_category_pk] = h_category_pk  # for Step 12
 
                 # Step 7. upsert l_product_category
                 hk_product_category_pk = uuid.uuid3(
@@ -197,24 +208,52 @@ class DdsMessageProcessor:
                 load_dt, load_src
             )
 
-            # Step 11. Сообщения для cdm-сервиса, а именно для заполненияcdm.user_product_counters
+            # Step 11. Сообщения для cdm-сервиса, а именно для заполнения cdm.user_product_counters
             # (счётчик заказов посетителя по продуктам (блюдам)).
             # Я думаю, делать надо так: агрегирую данные для пользователя и продуктов,
             # которые поучаствовали в данном заказе (то есть данные в БД были изменены),
-            # и отправляю сообщения в количестве, равном количеству продуктов в заказе,
+            # и отправляю сообщение, а в нём в payload/counters: list,
             # указывая тип сообщения (object_type) для обработчика - 'user_product_counters'.
             # Далее cdm-service тоже будет не инкрементить, а тупо апсертить данные в витрины,
             # после отработки каждого заказа, так надёжнее.
-            # TODO
+            list_dicts_product_counters = self._dds_repository.get_user_product_counters(h_user_pk, dict_product_pk)
+            random_uuid = uuid.uuid4()
+            msg_type = 'user_product_counters'
+            msg = {
+                'object_id': str(random_uuid),
+                'object_type': msg_type,
+                'payload': {
+                    'id': str(random_uuid),
+                    "counters": list_dicts_product_counters
+                }
+            }
+            self._kafka_producer.produce(msg)
 
             # Step 12. Сообщения для cdm-сервиса, а именно для заполненияcdm.user_category_counters
             # (счётчик заказов посетителя по категориям товаров).
             # Я думаю, делать надо так: агрегирую данные для пользователя и категорий,
             # которые поучаствовали в данном заказе (то есть данные в БД были изменены),
-            # и отправляю сообщения в количестве, равном количеству категорий в заказе,
+            # и отправляю сообщение, а в нём в payload/counters: list,
             # указывая тип сообщения (object_type) для обработчика - 'user_category_counters'.
             # Далее cdm-service тоже будет не инкрементить, а тупо апсертить данные в витрины,
             # после отработки каждого заказа, так надёжнее.
-            # TODO
+            list_dicts_category_counters = self._dds_repository.get_user_category_counters(h_user_pk, dict_category_pk)
+            random_uuid = uuid.uuid4()
+            msg_type = 'user_category_counters'
+            msg = {
+                'object_id': str(random_uuid),
+                'object_type': msg_type,
+                'payload': {
+                    'id': str(random_uuid),
+                    "counters": list_dicts_category_counters
+                }
+            }
+            self._kafka_producer.produce(msg)
+
+            # Step 13. Чистимся.
+            # не знаю, ндо ли в питоне следить за этим,
+            # но всё же мы резидентом висим в контейнере...
+            del dct_msg, msg, list_dicts_product_counters, list_dicts_category_counters, \
+                dict_product_pk, dict_category_pk, upsert_products, upsert_categories
 
         self._logger.info(f"{datetime.utcnow()}: FINISH")
