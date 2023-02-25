@@ -12,3 +12,8 @@ cr.yandex/crpqpe6k11qtk5akkaka/dds_service:v2023-02-25-r1
 cr.yandex/crpqpe6k11qtk5akkaka/cdm_service:v2023-02-25-r1
 ```
 
+### дашборд
+
+```bash
+https://datalens.yandex/psilbmxn1xm2f
+```
